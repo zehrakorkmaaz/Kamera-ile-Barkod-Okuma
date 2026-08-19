@@ -57,19 +57,27 @@ class ScannerConfig:
     brightness_max: float = 235.0
     contrast_min: float = 18.0
     # Fraction of near-white pixels that indicates specular glare on the label.
-    glare_ratio_max: float = 0.18
+    glare_ratio_max: float = 0.10
 
     # --- barcode detection ------------------------------------------------
-    detection_width: int = 640
+    detection_width: int = 1280
     # Long edge of a candidate, in full-resolution pixels.
-    min_barcode_size: int = 40
-    max_barcode_size: int = 2400
+    min_barcode_size: int = 28
+    max_barcode_size: int = 900
     max_candidates: int = 3
-    candidate_min_aspect: float = 1.25
+    candidate_min_aspect: float = 1.6
+    # Gradient blobs must look stripe-like; OpenCV detections skip this gate.
+    min_stripe_score: float = 0.40
     use_opencv_detector: bool = True
     use_gradient_detector: bool = True
     # Candidate long edge / ROI width below this means "too far away".
-    min_barcode_width_ratio: float = 0.09
+    min_barcode_width_ratio: float = 0.06
+    # short_edge floor: ince dikey çizgi adaylarını eler (ambalaj deseni, etiket kenarı)
+    min_barcode_short_edge: int = 18
+    # short_edge ceiling: tüm kareyi/kutuyu kapsayan dev blob'u eler
+    max_barcode_short_edge: int = 300
+    # Gerçek EAN-13 ~3:1, 1D barkodlar genellikle max ~8:1; daha uzun = yanlış algı
+    candidate_max_aspect: float = 10.0
 
     # --- ROI / preprocessing ----------------------------------------------
     # Quiet zone kept around the code; EAN/UPC need clear margins to decode.
@@ -78,22 +86,24 @@ class ScannerConfig:
     # Rectified codes are scaled towards this width instead of a blind fixed
     # multiplier: an EAN-13 is 95 modules wide, so ~480 px gives ~5 px/module,
     # comfortably above the ~2 px/module both decoders need.
-    roi_target_width: int = 480
+    roi_target_width: int = 640
     # Hard cap on enlargement.  A region too small to carry the modules cannot be
     # rescued by interpolation, and pretending otherwise only burns CPU.
-    upscale_factor: float = 3.0
-    max_processing_edge: int = 1800
+    upscale_factor: float = 4.5
+    max_processing_edge: int = 2000
 
     # --- decoding ----------------------------------------------------------
     use_opencv_decoder: bool = True
+    use_ocr_fallback: bool = True
     try_rotate: bool = True
     try_downscale: bool = True
     try_invert: bool = True
     # Time budget for one frame's escalation.  The cheap passes always run; the
     # heavy passes stop once the budget is gone, which bounds latency and CPU.
-    frame_budget_ms: float = 55.0
-    # Heavy (upscale/threshold) passes are pointless on a badly blurred frame.
-    heavy_pass_min_sharpness: float = 12.0
+    frame_budget_ms: float = 120.0
+    # Heavy (upscale/threshold) passes are pointless on a badly blurred frame,
+    # but on glossy labels sharpness is artificially low so the bar is still 0.
+    heavy_pass_min_sharpness: float = 6.0
 
     # --- confidence ---------------------------------------------------------
     weight_decode: float = 45.0
@@ -105,21 +115,21 @@ class ScannerConfig:
     weight_temporal: float = 5.0
     confidence_high: float = 90.0
     confidence_medium: float = 70.0
-    confidence_threshold: float = 70.0
+    confidence_threshold: float = 60.0
     # A single read this strong is trusted immediately (keeps the "supermarket
     # scanner" feel); anything weaker must repeat across frames.
-    instant_confirm_confidence: float = 70.0
+    instant_confirm_confidence: float = 60.0
 
     # --- temporal confirmation / state machine ------------------------------
-    confirmation_frames: int = 2
-    confirmation_window_seconds: float = 1.5
+    confirmation_frames: int = 1
+    confirmation_window_seconds: float = 1.0
     # Consecutive empty frames before an in-view barcode is considered gone.
-    miss_tolerance: int = 3
-    scan_cooldown_seconds: float = 1.5
+    miss_tolerance: int = 2
+    scan_cooldown_seconds: float = 0.8
     # A hint must hold this long before it is shown, so the UI does not flicker.
     # At 20-30 scans/second this is several agreeing frames, which is enough to
     # stop flapping while still reacting before the user has moved on.
-    hint_hold_seconds: float = 0.25
+    hint_hold_seconds: float = 0.12
     # How long a finished scan keeps its result on screen before the UI goes
     # back to guiding the user towards the next product.
     result_hold_seconds: float = 1.2

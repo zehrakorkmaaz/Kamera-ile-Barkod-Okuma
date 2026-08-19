@@ -126,7 +126,7 @@ class CameraService:
 
     @staticmethod
     def _visible_guide_roi(frame):
-        """Map the CSS 16:9/object-contain guide (7-93%, 10-90%) to frame pixels."""
+        """Map the CSS 16:9/object-contain guide (12-88%, 22-78%) to frame pixels."""
         height, width = frame.shape[:2]
         container_aspect = 16 / 9
         frame_aspect = width / height
@@ -139,7 +139,9 @@ class CameraService:
 
         # Intersect the visual guide with the actual rendered video (important
         # when a fallback camera returns 4:3 and object-fit introduces bars).
-        guide_left, guide_top, guide_right, guide_bottom = .07, .10, .93, .90
+        # A centred scan slot — wide enough to pass a product, tight enough that
+        # faces/background edges are not treated as barcodes.
+        guide_left, guide_top, guide_right, guide_bottom = .12, .22, .88, .78
         left = max(guide_left, offset_x)
         right = min(guide_right, offset_x + rendered_width)
         top = max(guide_top, offset_y)
@@ -323,9 +325,13 @@ class CameraService:
         """Store the detected barcode outline in full-frame coordinates."""
         if not self.config.preview_overlay:
             return
+        from services.vision.detection import looks_like_barcode
         quad = result.quad
-        if quad is None and result.candidates:
-            quad = result.candidates[0].quad
+        if quad is None:
+            for candidate in result.candidates:
+                if looks_like_barcode(candidate, self.config):
+                    quad = candidate.quad
+                    break
         if quad is None:
             return
         offset = np.array([roi_bounds[0], roi_bounds[1]], dtype=np.float32)

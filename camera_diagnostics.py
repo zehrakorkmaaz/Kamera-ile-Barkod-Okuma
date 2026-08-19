@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Report what the attached camera can actually do.
 
+    python camera_diagnostics.py --list
     python camera_diagnostics.py [--index 0] [--measure] [--json]
 
-Every line is verified by reading real frames, because `VideoCapture.set()`
-returning True means very little on most drivers.  Use this before blaming the
-software for a bad read: if the camera only grants 640x480, no amount of image
-processing will read an EAN-13 from a metre away.
+``--list`` only discovers indices that can deliver a frame; it does not start
+the scanner or negotiate a full capture profile.  Use ``--index`` for a deep
+report on one camera.
 """
 import argparse
 import json
 import sys
 
 from services.camera_device import CameraDevice
+from services.camera_discovery import discover_cameras, render_discovery_list
 from services.config import ScannerConfig
 from services.vision.simulate import barcode_pixel_width
 
@@ -84,11 +85,22 @@ def render(report: dict) -> str:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="SmartCart kamera tanılama")
-    parser.add_argument("--index", type=int, default=None, help="kamera indeksi")
+    parser = argparse.ArgumentParser(description="Kamera tanılama ve keşif aracı")
+    parser.add_argument("--list", action="store_true",
+                        help="sistemdeki kullanılabilir kameraları listele (hafif keşif)")
+    parser.add_argument("--max-index", type=int, default=9,
+                        help="--list ile taranacak son index (varsayılan: 9)")
+    parser.add_argument("--index", type=int, default=None, help="detaylı rapor için kamera indeksi")
     parser.add_argument("--measure", action="store_true", help="gerçek FPS'i ölç (2 sn)")
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args(argv)
+
+    if args.list:
+        cameras = discover_cameras(max_index=args.max_index)
+        payload = {"cameras": [camera.as_dict() for camera in cameras]}
+        print(json.dumps(payload, indent=2, ensure_ascii=False) if args.as_json
+              else render_discovery_list(cameras))
+        return 0
 
     config = ScannerConfig.from_env()
     index = args.index if args.index is not None else config.camera_index

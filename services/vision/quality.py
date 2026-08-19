@@ -33,7 +33,7 @@ HINT_MESSAGES = {
     QualityHint.OK: "Barkodu kameraya gösterin",
     QualityHint.TOO_DARK: "Barkodu daha aydınlık bir alana çevirin",
     QualityHint.TOO_BRIGHT: "Ortam çok parlak, kamerayı ışıktan uzaklaştırın",
-    QualityHint.GLARE: "Parlama var, ürünü hafifçe eğin",
+    QualityHint.GLARE: "Parlama var, ürünü hafif eğin",
     QualityHint.BLURRY: "Ürünü sabit tutun",
     QualityHint.LOW_CONTRAST: "Barkodun daha görünür olduğundan emin olun",
 }

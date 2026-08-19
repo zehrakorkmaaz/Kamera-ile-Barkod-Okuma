@@ -25,9 +25,11 @@ def _frame_source(config):
     return FolderFrameSource(folder=config.test_image_dir, config=config)
 
 
-def create_app(test_config=None):
+def create_app(test_config=None, camera_index=None):
     app = Flask(__name__)
     scanner_config = ScannerConfig.from_env()
+    if camera_index is not None:
+        scanner_config = scanner_config.replace(camera_index=camera_index)
     app.config.from_mapping(
         DATABASE=str(BASE_DIR / "smartcart.db"),
         UPLOAD_FOLDER=str(BASE_DIR / "uploads"),
@@ -36,6 +38,10 @@ def create_app(test_config=None):
     )
     if test_config:
         app.config.update(test_config)
+
+    scanner_config = app.config["SCANNER_CONFIG"]
+    camera_index = scanner_config.camera_index
+    app.config["CAMERA_INDEX"] = camera_index
 
     logging.basicConfig(
         level=os.environ.get("SMARTCART_LOG_LEVEL", "INFO").upper(),
@@ -46,8 +52,8 @@ def create_app(test_config=None):
     products.migrate()
     # The camera looks products up itself so a confirmed scan arrives at the UI
     # complete, instead of costing an extra round trip.
-    camera = CameraService(app.config["CAMERA_INDEX"], config=app.config["SCANNER_CONFIG"],
-                           lookup=products.find, device=_frame_source(app.config["SCANNER_CONFIG"]))
+    camera = CameraService(camera_index, config=scanner_config,
+                           lookup=products.find, device=_frame_source(scanner_config))
     app.extensions["products"] = products
     app.extensions["camera"] = camera
 
@@ -139,7 +145,14 @@ def create_app(test_config=None):
 
 
 if __name__ == "__main__":
-    app = create_app()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Kamera ile barkod okuma")
+    parser.add_argument("--camera", type=int, default=None,
+                        help="OpenCV kamera index'i (varsayılan: SMARTCART_CAMERA_INDEX veya 0)")
+    args = parser.parse_args()
+
+    app = create_app(camera_index=args.camera)
     # AVFoundation needs to open the camera from Python's main thread in order to
     # trigger macOS's permission flow.  Later start requests remain harmless.
     app.extensions["camera"].start()

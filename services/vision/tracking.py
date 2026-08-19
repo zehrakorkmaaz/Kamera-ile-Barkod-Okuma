@@ -35,7 +35,7 @@ class ScanState(str, Enum):
 
 
 STATE_MESSAGES = {
-    ScanState.IDLE: "Barkodu kameraya gösterin",
+    ScanState.IDLE: "Barkodu çerçeveye getirin",
     ScanState.DETECTING: "Barkod algılandı, okunuyor…",
     ScanState.CANDIDATE: "Barkod doğrulanıyor…",
     ScanState.CONFIRMED: "Barkod okundu",
@@ -43,10 +43,12 @@ STATE_MESSAGES = {
     ScanState.PRODUCT_UNKNOWN: "Bu barkod ürün kataloğunda bulunamadı",
     ScanState.RESULT_CONFLICT: "Barkod net okunamadı, ürünü yeniden gösterin",
     ScanState.COOLDOWN: "Sonraki ürünü gösterebilirsiniz",
-    ScanState.READY: "Barkodu kameraya gösterin",
+    ScanState.READY: "Barkodu çerçeveye getirin",
 }
 
-TOO_FAR_MESSAGE = "Barkodu kameraya yaklaştırın"
+TOO_FAR_MESSAGE = "Barkodu biraz daha yaklaştırın"
+STUCK_DETECTING_MESSAGE = "Barkodu düz tutup kısa süre sabit bekleyin"
+DETECTING_HINT_SECONDS = 1.0
 
 
 @dataclass
@@ -129,6 +131,7 @@ class ScanTracker:
         self._hint_message = STATE_MESSAGES[ScanState.IDLE]
         self._pending_message = self._hint_message
         self._pending_since = 0.0
+        self._detecting_since = 0.0
 
     # -- main entry point --------------------------------------------------
 
@@ -143,6 +146,11 @@ class ScanTracker:
             return None
 
         if not result.value:
+            if result.candidates and self.active_value:
+                # A new barcode-shaped region is visible but the previous product's
+                # code is no longer decoding -- the user switched items.
+                self.active_value = None
+                self._misses = 0
             return self._observe_miss(now, result)
 
         track = self.tracks.get(result.value)
@@ -159,9 +167,9 @@ class ScanTracker:
             self._transition(self._post_scan_state(), now, result)
             return None
 
-        if not self._cooldown_elapsed(track.value, now):
-            # Left the frame and came straight back; wait out the cooldown so a
-            # wobble cannot register the same item twice.
+        if not self._cooldown_elapsed(track.value, now) and self.active_value is not None:
+            # Cooldown only while the previous item is still considered in view.
+            # Once it leaves the frame the same code may be scanned again at once.
             self._count("duplicate_scan_count")
             self._transition(ScanState.COOLDOWN, now, result)
             return None
@@ -180,7 +188,10 @@ class ScanTracker:
             # The code left the frame: the same product may be scanned again.
             self.active_value = None
         if self.active_value or self._holding_result(now):
-            self._transition(self._post_scan_state(), now, result)
+            if result.candidates and not result.value:
+                self._transition(ScanState.DETECTING, now, result)
+            else:
+                self._transition(self._post_scan_state(), now, result)
         elif result.candidates:
             self._transition(ScanState.DETECTING, now, result)
         elif self._in_cooldown(now):
@@ -242,6 +253,10 @@ class ScanTracker:
 
     def _transition(self, state: ScanState, now: float, result) -> None:
         previous, self.state = self.state, state
+        if state is ScanState.DETECTING and previous is not ScanState.DETECTING:
+            self._detecting_since = now
+        if state is not ScanState.DETECTING:
+            self._detecting_since = 0.0
         # Smoothing applies *between* advisory messages.  Leaving a real outcome
         # must clear it at once, or the UI would still claim success while the
         # user is already holding up the next product.
@@ -256,6 +271,15 @@ class ScanTracker:
 
     def _message_for(self, state: ScanState, result) -> str:
         """Prefer an actionable, image-derived reason over a generic status."""
+        if state is ScanState.DETECTING and result is not None:
+            if result.too_far:
+                return TOO_FAR_MESSAGE
+            quality = result.quality
+            if quality is not None and quality.hint is QualityHint.GLARE:
+                return quality.message
+            if (self._detecting_since and time.monotonic() - self._detecting_since
+                    >= DETECTING_HINT_SECONDS):
+                return STUCK_DETECTING_MESSAGE
         if state in (ScanState.IDLE, ScanState.DETECTING) and result is not None:
             if state is ScanState.DETECTING and result.too_far:
                 return TOO_FAR_MESSAGE

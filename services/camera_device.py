@@ -24,7 +24,8 @@ from services.config import DEFAULT_CONFIG, ScannerConfig
 logger = logging.getLogger("smartcart.camera")
 
 # Backward-compatible aliases; prefer the index-aware helpers below.
-PERMISSION_HINT = "macOS: System Settings > Privacy & Security > Camera."
+PERMISSION_HINT = ("macOS: System Settings > Privacy & Security > Camera. "
+                   "Run `python camera_diagnostics.py --list` to find indices.")
 PERMISSION_ERROR = f"Camera could not be opened. {PERMISSION_HINT}"
 READ_ERROR = "Could not read frames from the camera. Check the connection."
 
@@ -247,9 +248,13 @@ class CameraDevice:
     @staticmethod
     def _fourcc(capture) -> str:
         value = int(capture.get(cv2.CAP_PROP_FOURCC))
-        if not value:
+        if value <= 0:
             return ""
-        return "".join(chr((value >> shift) & 0xFF) for shift in (0, 8, 16, 24)).strip()
+        chars = "".join(chr((value >> shift) & 0xFF) for shift in (0, 8, 16, 24))
+        cleaned = chars.strip("\x00\xff ").strip()
+        if not cleaned or not cleaned.isprintable():
+            return ""
+        return cleaned
 
     @staticmethod
     def _probe(capture) -> dict:
@@ -285,7 +290,9 @@ class CameraDevice:
                      "requested": f"{width}x{height}", "fps": self._reported_fps(self.capture),
                      "fourcc": self._fourcc(self.capture),
                      "exact": (actual_w, actual_h) == (width, height)}
-            if entry not in supported:
+            key = (entry["width"], entry["height"], entry["fps"], entry["fourcc"])
+            if key not in {(item["width"], item["height"], item["fps"], item["fourcc"])
+                           for item in supported}:
                 supported.append(entry)
         if original != (0, 0):
             self._apply(self.capture, *original)

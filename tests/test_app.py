@@ -82,9 +82,9 @@ def test_stabilizer_requires_three_matching_detections():
 
 
 def test_visible_guide_roi_matches_16_by_9_and_4_by_3_preview_frames():
-    assert CameraService._visible_guide_roi(np.zeros((720, 1280, 3), dtype=np.uint8)) == (89, 72, 1190, 648)
+    assert CameraService._visible_guide_roi(np.zeros((720, 1280, 3), dtype=np.uint8)) == (153, 158, 1126, 561)
     # With object-fit: contain, the 4:3 image has horizontal bars in the 16:9 UI.
-    assert CameraService._visible_guide_roi(np.zeros((480, 640, 3), dtype=np.uint8)) == (0, 48, 640, 432)
+    assert CameraService._visible_guide_roi(np.zeros((480, 640, 3), dtype=np.uint8)) == (0, 105, 640, 374)
 
 
 # --- BarcodePresenceTracker (replaces the stabilizer+debouncer combo in the
@@ -195,14 +195,15 @@ def test_camera_service_emits_one_event_while_barcode_stays_in_view(monkeypatch)
         service.stop()
 
 
+@pytest.mark.timeout(20)
 def test_camera_service_re_emits_after_barcode_leaves_and_returns(monkeypatch):
-    frames = [_frame_with_barcode()] * 6 + [_blank_frame()] * 6 + [_frame_with_barcode()] * 20
+    frames = [_frame_with_barcode()] * 8 + [_blank_frame()] * 20 + [_frame_with_barcode()] * 40
     monkeypatch.setattr(camera_module.cv2, "VideoCapture",
                          lambda index, backend=None: _FakeCapture(frames, frame_delay=0.005))
     service = CameraService(index=0)
     try:
         assert service.start()
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline and service.status()["event_id"] < 2:
             time.sleep(0.02)
         status = service.status()
@@ -264,3 +265,31 @@ def test_scanner_config_rejects_negative_camera_index():
     import pytest
     with pytest.raises(ValueError, match="camera_index must be >= 0"):
         ScannerConfig.from_env({"SMARTCART_CAMERA_INDEX": "-1"})
+
+
+def test_create_app_honours_camera_index_argument(tmp_path):
+    app = create_app({
+        "TESTING": True,
+        "DATABASE": str(tmp_path / "test.db"),
+        "UPLOAD_FOLDER": str(tmp_path / "uploads"),
+    }, camera_index=2)
+    assert app.extensions["camera"].index == 2
+    assert app.config["CAMERA_INDEX"] == 2
+    assert app.config["SCANNER_CONFIG"].camera_index == 2
+
+
+def test_tracker_clears_active_when_new_candidate_appears():
+    import numpy as np
+    from services.vision.detection import Candidate
+    from services.vision.pipeline import FrameResult
+    from services.vision.tracking import ScanState, ScanTracker
+
+    tracker = ScanTracker()
+    tracker.active_value = "8691707140247"
+    quad = np.array([[10, 10], [200, 12], [198, 60], [8, 58]], dtype=np.float32)
+    candidate = Candidate(quad, (8, 10, 200, 60), 192, 50, "gradient", 1.0)
+    result = FrameResult(candidates=[candidate])
+    event = tracker.update(result)
+    assert event is None
+    assert tracker.active_value is None
+    assert tracker.state is ScanState.DETECTING

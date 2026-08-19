@@ -174,10 +174,12 @@ def decode_image(image: np.ndarray, config: ScannerConfig = DEFAULT_CONFIG,
         raise RuntimeError("zxing-cpp yüklü değil. `pip install -r requirements.txt` çalıştırın.")
     if image is None or image.size == 0:
         return []
+    # Downscaling helps large codes but destroys small/distant ones in a crop.
+    use_downscale = config.try_downscale and max(image.shape[:2]) >= 720
     try:
         symbols = zxingcpp.read_barcodes(
             image, formats=_zxing_formats(), try_rotate=config.try_rotate,
-            try_downscale=config.try_downscale, try_invert=config.try_invert)
+            try_downscale=use_downscale, try_invert=config.try_invert)
     except Exception:
         # A decoder crash on one odd frame must never take the scan loop down.
         return []

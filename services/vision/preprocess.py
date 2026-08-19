@@ -173,7 +173,55 @@ def _resize(image: np.ndarray, scale: float, config: ScannerConfig) -> np.ndarra
                       interpolation=interpolation)
 
 
-def variants(region: np.ndarray, level: int, config: ScannerConfig = DEFAULT_CONFIG):
+def reduce_glare(gray: np.ndarray, threshold: int = 230) -> np.ndarray:
+    """Fill specular highlights so bar modules become readable again.
+
+    Uses a gentler inpaint radius so thin bars adjacent to the highlight
+    are not smeared away.
+    """
+    bright = (gray >= threshold).astype(np.uint8) * 255
+    density = bright.sum() / (gray.size * 255)
+    if density < 0.003:
+        return gray
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.dilate(bright, kernel, iterations=1)
+    return cv2.inpaint(gray, mask, 3, cv2.INPAINT_TELEA)
+
+
+def unsharp(gray: np.ndarray, strength: float = 1.6, sigma: float = 1.0) -> np.ndarray:
+    """Unsharp mask to recover bar contrast lost on shiny plastics."""
+    blurred = cv2.GaussianBlur(gray, (0, 0), sigma)
+    return cv2.addWeighted(gray, 1 + strength, blurred, -strength, 0)
+
+
+def glare_variants(region: np.ndarray, config: ScannerConfig = DEFAULT_CONFIG):
+    """Fast glare recovery variants, run before the heavy escalation ladder."""
+    gray = to_gray(region)
+
+    # path 1: unsharp mask — often enough when contrast is the only problem
+    sharp = unsharp(gray)
+    yield "unsharp", sharp
+    clahe_sharp = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(sharp)
+    yield "unsharp-clahe", clahe_sharp
+    yield "unsharp-adaptive", cv2.adaptiveThreshold(
+        clahe_sharp, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 4)
+
+    # path 2: inpaint highlights then enhance
+    deglared = reduce_glare(gray)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(deglared)
+    yield "deglare-clahe", clahe
+    yield "deglare-adaptive", cv2.adaptiveThreshold(
+        clahe, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 4)
+    if max(region.shape[:2]) < 400:
+        scale = min(config.upscale_factor, 3.0)
+        upscaled = _resize(clahe, scale, config)
+        yield "deglare-upscale", upscaled
+        yield "deglare-upscale-adaptive", cv2.adaptiveThreshold(
+            upscaled, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 41, 6)
+
+
+def variants(region: np.ndarray, level: int, config: ScannerConfig = DEFAULT_CONFIG,
+             *, glare: bool = False):
     """Yield (name, image) decoding inputs for one escalation level.
 
     Level 0 is nearly free and handles clean, well-lit labels.  Level 1 fixes
@@ -184,6 +232,8 @@ def variants(region: np.ndarray, level: int, config: ScannerConfig = DEFAULT_CON
     gray = to_gray(region)
     if level == 0:
         yield "gray", gray
+        if glare:
+            yield from glare_variants(region, config)
         return
     if level == 1:
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
@@ -194,7 +244,8 @@ def variants(region: np.ndarray, level: int, config: ScannerConfig = DEFAULT_CON
     yield "otsu", cv2.threshold(clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
     yield "adaptive", cv2.adaptiveThreshold(clahe, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                             cv2.THRESH_BINARY, 31, 4)
-    upscaled = _resize(clahe, 2.0, config)
+    upscale = 3.0 if max(region.shape[:2]) < 280 else 2.0
+    upscaled = _resize(clahe, upscale, config)
     yield "upscale-clahe", upscaled
     yield "upscale-adaptive", cv2.adaptiveThreshold(upscaled, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                                     cv2.THRESH_BINARY, 41, 6)
