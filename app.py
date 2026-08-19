@@ -100,7 +100,7 @@ def create_app(test_config=None):
     def start_camera():
         if camera.start():
             return jsonify({"started": True})
-        return jsonify({"error": camera.error or "Kamera açılamadı. macOS kamera iznini kontrol edin."}), 503
+        return jsonify({"error": camera.error or f"Camera {camera.index} could not be opened."}), 503
 
     @app.post("/api/camera/stop")
     def stop_camera():

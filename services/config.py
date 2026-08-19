@@ -146,7 +146,10 @@ class ScannerConfig:
             except (TypeError, ValueError):
                 # A malformed override must never stop the scanner from starting.
                 continue
-        return cls(**{**values, **overrides})
+        config = cls(**{**values, **overrides})
+        if config.camera_index < 0:
+            raise ValueError(f"camera_index must be >= 0, got {config.camera_index}")
+        return config
 
     def replace(self, **changes) -> "ScannerConfig":
         from dataclasses import replace as _replace

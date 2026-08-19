@@ -23,9 +23,27 @@ from services.config import DEFAULT_CONFIG, ScannerConfig
 
 logger = logging.getLogger("smartcart.camera")
 
-PERMISSION_ERROR = ("Kamera açılamadı. macOS Sistem Ayarları > Gizlilik ve Güvenlik > Kamera "
-                    "bölümünden kamera iznini kontrol edin.")
-READ_ERROR = "Kameradan görüntü alınamadı. Kamera bağlantısını kontrol edin."
+# Backward-compatible aliases; prefer the index-aware helpers below.
+PERMISSION_HINT = "macOS: System Settings > Privacy & Security > Camera."
+PERMISSION_ERROR = f"Camera could not be opened. {PERMISSION_HINT}"
+READ_ERROR = "Could not read frames from the camera. Check the connection."
+
+
+def open_failed_message(index: int, *, permission_hint: bool = True) -> str:
+    """Human-readable message when ``VideoCapture`` fails to open an index."""
+    message = f"Camera {index} could not be opened."
+    if permission_hint:
+        message = f"{message} {PERMISSION_HINT}"
+    return message
+
+
+def read_failed_message(index: int) -> str:
+    """Human-readable message when consecutive frame reads fail."""
+    return f"Camera {index}: could not read frames. Check the connection."
+
+
+def invalid_index_message(index: int) -> str:
+    return f"Invalid camera index {index}. Use 0 or a positive integer."
 
 #  Read-only diagnostics: reported in the capability report, never written.
 PROBE_PROPERTIES = {
@@ -82,11 +100,16 @@ class CameraDevice:
     def open(self) -> bool:
         """Open the device and negotiate the best profile it will actually give."""
         self.close()
+        if self.index < 0:
+            self.error = invalid_index_message(self.index)
+            logger.warning("CAMERA_INVALID_INDEX index=%s", self.index)
+            return False
+
         backend = cv2.CAP_AVFOUNDATION if hasattr(cv2, "CAP_AVFOUNDATION") else cv2.CAP_ANY
         capture = cv2.VideoCapture(self.index, backend)
         if not capture.isOpened():
             capture.release()
-            self.error = PERMISSION_ERROR
+            self.error = open_failed_message(self.index)
             logger.warning("CAMERA_OPEN_FAILED index=%s", self.index)
             return False
 
@@ -94,7 +117,7 @@ class CameraDevice:
         profile = self._negotiate(capture)
         if profile is None:
             self.close()
-            self.error = READ_ERROR
+            self.error = read_failed_message(self.index)
             return False
 
         self.profile = profile
@@ -132,7 +155,7 @@ class CameraDevice:
             return True, frame
         self.consecutive_failures += 1
         if self.consecutive_failures >= self.config.reconnect_after_failures:
-            self.error = READ_ERROR
+            self.error = read_failed_message(self.index)
         return False, None
 
     def needs_reconnect(self) -> bool:

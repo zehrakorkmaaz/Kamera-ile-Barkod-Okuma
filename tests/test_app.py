@@ -210,3 +210,57 @@ def test_camera_service_re_emits_after_barcode_leaves_and_returns(monkeypatch):
         assert status["barcode"] == "8690530046269"
     finally:
         service.stop()
+
+
+# --- Camera index management (Stage 1) ------------------------------------
+
+def test_open_failed_message_includes_index():
+    from services.camera_device import open_failed_message, read_failed_message, invalid_index_message
+    assert open_failed_message(2).startswith("Camera 2 could not be opened.")
+    assert read_failed_message(1).startswith("Camera 1:")
+    assert "Invalid camera index -1" in invalid_index_message(-1)
+
+
+def test_camera_device_rejects_negative_index():
+    from services.camera_device import CameraDevice, invalid_index_message
+    device = CameraDevice(index=-1)
+    assert not device.open()
+    assert device.error == invalid_index_message(-1)
+
+
+def test_camera_service_reports_index_in_status():
+    service = CameraService(index=2)
+    try:
+        status = service.status()
+        assert status["camera_index"] == 2
+        debug = service.debug_status()
+        assert debug["camera_index"] == 2
+    finally:
+        service.stop()
+
+
+def test_camera_service_open_failure_includes_index(monkeypatch):
+    from services.camera_device import open_failed_message
+
+    class _ClosedCapture:
+        def isOpened(self):
+            return False
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr("services.camera_device.cv2.VideoCapture",
+                        lambda index, backend=None: _ClosedCapture())
+    service = CameraService(index=2)
+    try:
+        assert not service.start()
+        assert service.error == open_failed_message(2)
+    finally:
+        service.stop()
+
+
+def test_scanner_config_rejects_negative_camera_index():
+    from services.config import ScannerConfig
+    import pytest
+    with pytest.raises(ValueError, match="camera_index must be >= 0"):
+        ScannerConfig.from_env({"SMARTCART_CAMERA_INDEX": "-1"})

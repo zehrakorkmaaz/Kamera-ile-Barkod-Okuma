@@ -22,7 +22,7 @@ import time
 import cv2
 import numpy as np
 
-from services.camera_device import CameraDevice, PERMISSION_ERROR
+from services.camera_device import CameraDevice, open_failed_message
 from services.config import DEFAULT_CONFIG, ScannerConfig
 from services.vision.metrics import ScanMetrics
 from services.vision.pipeline import BarcodePipeline
@@ -97,7 +97,7 @@ class CameraService:
         if self._capture_thread and self._capture_thread.is_alive():
             return True
         if not self._device.open():
-            self._set_error(self._device.error or PERMISSION_ERROR)
+            self._set_error(self._device.error or open_failed_message(self.index))
             return False
         self._set_error(None)
         self._stop.clear()
@@ -350,17 +350,17 @@ class CameraService:
         tracker = self.tracker
         with self._lock:
             return {"running": self.running, "error": self._error,
-                    "barcode": self._last_barcode, "event_id": self._event_id,
-                    "state": tracker.state.value, "message": tracker.message,
-                    "product": self._last_product, "found": self._last_found,
-                    "scan": self._last_event}
+                    "camera_index": self.index, "barcode": self._last_barcode,
+                    "event_id": self._event_id, "state": tracker.state.value,
+                    "message": tracker.message, "product": self._last_product,
+                    "found": self._last_found, "scan": self._last_event}
 
     def debug_status(self):
         """Everything a person debugging a bad read could want."""
         with self._lock:
             debug = dict(self._debug)
             error = self._error
-        return {"running": self.running, "error": error,
+        return {"running": self.running, "error": error, "camera_index": self.index,
                 "camera": self._device.profile.as_dict(),
                 "capabilities": self._device.capabilities,
                 "resolution": [self._device.profile.width, self._device.profile.height],
